@@ -1,21 +1,52 @@
 ---
-- name: Playbook para validar comunicación con API de OpenShift
+- name: Playbook para validar comunicación y autenticación con API de OpenShift
   hosts: localhost
   tasks:
+    - name: Validar comunicación con la API de OpenShift
+      uri:
+        url: "https://api.sno.labjp.xyz:6443/version"
+        method: GET
+        return_content: yes
+        validate_certs: no  # Cambia a "yes" si usas certificados válidos
+      register: api_response
+      failed_when: "'major' not in api_response.json"
+
+    - name: Mostrar la versión de OpenShift
+      debug:
+        msg: "Versión de OpenShift: {{ api_response.json.gitVersion }}"
+
+    - name: Validar autenticación con API de OpenShift
+      uri:
+        url: "https://api.sno.labjp.xyz:6443/apis"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ lookup('env', 'K8S_AUTH_API_KEY') }}"
+        return_content: yes
+        validate_certs: no  # Cambia a "yes" si usas certificados válidos
+      register: auth_response
+      failed_when: "'kind' not in auth_response.json"
+    
+    - name: Mostrar mensaje si la autenticación fue exitosa
+      debug:
+        msg: "Autenticación exitosa. Acceso a la API de OpenShift confirmado."
+
     - name: Validar comunicación con API de OpenShift obteniendo información de los pods
       k8s_info:
-        api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"  # Asegúrate de que el token esté disponible como variable de entorno
-        host: "https://api.sno.labjp.xyz:6443"  # Cambia esta URL por la URL de tu API de OpenShift
-        verify_ssl: no  # Cambia a "yes" si usas certificados válidos
+        api_key: "{{ lookup('env', 'K8S_AUTH_API_KEY') }}"
+        host: "https://api.sno.labjp.xyz:6443"
+        verify_ssl: no
         kind: Pod
         namespace: default  # Cambia al namespace que desees consultar
       register: pods_info
+      when: "'kind' in auth_response.json"
 
     - name: Mostrar la lista de pods del namespace default
       debug:
         msg: "{{ pods_info.resources | map(attribute='metadata.name') | list }}"
+      when: pods_info.resources is defined
 
     - name: Crear un archivo de prueba si la API responde correctamente
       file:
         path: /tmp/archivo_prueba_api_openshift.txt
         state: touch
+      when: pods_info.resources is defined
